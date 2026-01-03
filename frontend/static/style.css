@@ -1,0 +1,203 @@
+:root {
+    --primary-color: #007bff;
+    --primary-hover: #0056b3;
+    --background-color: #f4f7f6;
+    --container-bg: #ffffff;
+    --border-color: #e0e0e0;
+    --bot-message-bg: #e2e6ea;
+    --user-message-bg: var(--primary-color);
+    --bot-text-color: #333;
+    --user-text-color: white;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--background-color);
+    margin: 0;
+    padding: 0;
+}
+
+/* Main Website Content */
+.main-content {
+    padding: 50px;
+    text-align: center;
+}
+
+/* Floating Widget Button */
+.chat-widget-button {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 60px;
+    height: 60px;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    z-index: 1000;
+    transition: transform 0.2s ease-in-out;
+}
+
+.chat-widget-button:hover {
+    transform: scale(1.1);
+}
+
+/* Chat Container */
+.chat-container {
+    position: fixed;
+    bottom: 100px;
+    right: 30px;
+    width: 380px;
+    height: 500px; /* Fixed height */
+    background-color: var(--container-bg);
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    box-sizing: border-box;
+    z-index: 999;
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out, visibility 0.3s;
+    transform: scale(0.95);
+    opacity: 0;
+    visibility: hidden;
+}
+
+.chat-container.chat-container-open {
+    visibility: visible;
+    transform: scale(1);
+    opacity: 1;
+}
+
+.chat-container.chat-container-closed {
+    visibility: hidden;
+    transform: scale(0.95);
+    opacity: 0;
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.chat-header h3 {
+    font-size: 1.2em;
+    color: #333;
+    margin: 0;
+}
+
+.close-button {
+    background: none;
+    border: none;
+    font-size: 1.5em;
+    cursor: pointer;
+    color: #666;
+}
+
+.chat-history {
+    flex-grow: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background-color: #fbfbfb;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 350px; /* Fixed height for chat history */
+}
+
+/* Message Bubbles */
+.message {
+    padding: 10px 15px;
+    border-radius: 18px;
+    max-width: 80%;
+    word-wrap: break-word;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+.user-message {
+    background-color: var(--user-message-bg);
+    color: var(--user-text-color);
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+}
+
+.bot-message {
+    background-color: var(--bot-message-bg);
+    color: var(--bot-text-color);
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+}
+
+/* Chat Input Area */
+.chat-input-area {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+#user-input {
+    flex-grow: 1;
+    padding: 10px 15px;
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    font-size: 0.9em;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#user-input:focus {
+    border-color: var(--primary-color);
+}
+
+#send-button {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: background-color 0.2s;
+}
+
+#send-button:hover {
+    background-color: var(--primary-hover);
+}
+
+#send-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+.loading-indicator {
+    text-align: center;
+    margin-top: 10px;
+    color: #666;
+    font-style: italic;
+    font-size: 0.85em;
+}
+
+/* Responsive adjustments */
+@media (max-width: 500px) {
+    .chat-container {
+        width: 90%;
+        bottom: 20px;
+        right: 5%;
+        max-height: 70vh;
+    }
+    .chat-widget-button {
+        bottom: 20px;
+        right: 20px;
+    }
+}

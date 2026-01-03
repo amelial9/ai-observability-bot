@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company FAQ Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+
+    <div class="main-content">
+        <h1>Company Website Goes Here</h1>
+    </div>
+
+    <div id="chat-widget-button" class="chat-widget-button">
+        <i class="fas fa-comment-dots"></i>
+    </div>
+
+    <div class="chat-container chat-container-closed" id="chat-container">
+        <div class="chat-header">
+            <h3>Company FAQ Assistant</h3>
+            <button id="close-button" class="close-button">&times;</button>
+        </div>
+        <div class="chat-history" id="chat-history">
+            <div class="message bot-message">Hello! How can I help you with company FAQs today?</div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="user-input" placeholder="Ask a question..." autocomplete="off">
+            <button id="send-button">Send</button>
+        </div>
+        <div class="loading-indicator" id="loading-indicator" style="display: none;">Thinking...</div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

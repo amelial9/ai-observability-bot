@@ -1,0 +1,17 @@
+# Existing requirements
+fastapi
+uvicorn[standard]
+python-dotenv
+jinja2
+openinference-instrumentation-beeai
+opentelemetry-sdk
+opentelemetry-api
+chromadb
+sentence-transformers
+pandas
+OpenLIT
+
+# New requirements for sentiment analysis and email
+openai>=1.0.0
+
+dotenv

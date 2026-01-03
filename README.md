@@ -1,1 +1,1 @@
-# ai-observability-bot
+# AI Observability Bot

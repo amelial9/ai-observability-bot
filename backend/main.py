@@ -20,11 +20,11 @@ from contextlib import asynccontextmanager
 from opentelemetry import trace
 
 # Import existing modules
-from agent import run_faq_agent, _setup_rag_system
+from backend.agent import run_faq_agent, _setup_rag_system
 
 # Import new sentiment analysis modules
-from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
-from email_service import EmailService
+from backend.sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
+from backend.email_service import EmailService
 
 # Initialize sentiment analysis components
 sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
@@ -88,11 +88,11 @@ app.add_middleware(
 
 app.mount(
     "/static",
-    StaticFiles(directory="../frontend/static"),
+    StaticFiles(directory="frontend/static"),
     name="static"
 )
 
-templates = Jinja2Templates(directory="../frontend")
+templates = Jinja2Templates(directory="frontend")
 
 class ChatRequest(BaseModel):
     query: str

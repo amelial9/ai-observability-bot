@@ -9,6 +9,7 @@ opentelemetry-api
 chromadb
 sentence-transformers
 pandas
+openpyxl
 OpenLIT
 
 # New requirements for sentiment analysis and email

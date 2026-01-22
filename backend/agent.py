@@ -107,7 +107,7 @@ print("👂 Sidecar is now listening...")
 if __name__ == "__main__":
     print("🚀 Sidecar daemon is now running and listening for OpenAI calls...")
     try:
-       
+
         while True:
             time.sleep(60)
 
@@ -145,7 +145,8 @@ import chromadb  # Vector database for storing and searching FAQ embeddings
 
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'  # Lightweight but effective embedding model
-CHROMA_PERSIST_PATH = "../my_chroma_db"  # Local path for ChromaDB storage
+# Use path relative to project root (where uvicorn is started from)
+CHROMA_PERSIST_PATH = "my_chroma_db"  # Local path for ChromaDB storage
 CHROMA_COLLECTION_NAME = "company_faqs"  # Collection name in ChromaDB
 
 # Global variables to store initialized components (singleton pattern)
@@ -163,18 +164,18 @@ def setup_splunk_otel():
     if not OTEL_AVAILABLE:
         print("⚠️  OpenTelemetry not available - skipping OTEL setup")
         return None
-    
+
     try:
         # Configuration from environment variables
         OTEL_ENDPOINT = "http://localhost:4328/v1/traces"
         SERVICE_NAME = "beeai-faq-agent"
         ENVIRONMENT = "production"
-        
+
         print(f"🔧 Setting up Splunk SignalFX OTEL integration...")
         print(f"   Endpoint: {OTEL_ENDPOINT}")
         print(f"   Service: {SERVICE_NAME}")
         print(f"   Environment: {ENVIRONMENT}")
-        
+
         # Create resource with service information
         resource = Resource.create({
             "service.name": SERVICE_NAME,
@@ -183,10 +184,10 @@ def setup_splunk_otel():
             "telemetry.sdk.name": "beeai-framework",
             "telemetry.sdk.version": "0.1.17"
         })
-        
+
         # Create tracer provider
         tracer_provider = TracerProvider(resource=resource)
-        
+
         # Create OTLP exporter for Splunk SignalFX
         otlp_exporter = OTLPSpanExporter(
             endpoint=OTEL_ENDPOINT,
@@ -196,16 +197,16 @@ def setup_splunk_otel():
                 # "X-SF-TOKEN": "your-signalfx-token"
             }
         )
-        
+
         # Add batch processor
         tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-        
+
         # Set as global tracer provider
         trace.set_tracer_provider(tracer_provider)
-        
+
         print("✅ Splunk SignalFX OTEL integration configured successfully")
         return tracer_provider
-        
+
     except Exception as e:
         print(f"⚠️  Failed to configure Splunk SignalFX OTEL: {e}")
         print("💡 Check your OTEL endpoint and configuration")
@@ -215,21 +216,21 @@ def test_span_export(tracer_provider, endpoint: str):
     """Test that spans can be exported successfully to verify connectivity."""
     try:
         print(f"🧪 Testing span export to {endpoint}...")
-        
+
         # Create a test span
         test_tracer = trace.get_tracer("span-test")
         with test_tracer.start_as_current_span("test_span") as span:
             span.set_attribute("test.attribute", "span_export_test")
             span.set_attribute("test.timestamp", time.time())
             span.set_attribute("test.service", "beeai-faq-agent")
-        
+
         # Force export by shutting down the tracer provider
         tracer_provider.force_flush()
-        
+
         print("✅ Span export test completed successfully")
         print("💡 Check your Splunk dashboard for the test span")
         return True
-        
+
     except Exception as e:
         print(f"❌ Span export test failed: {e}")
         print("💡 Check your OTEL endpoint connectivity")
@@ -238,10 +239,10 @@ def test_span_export(tracer_provider, endpoint: str):
 def _setup_rag_system():
     """
     Initializes all RAG system components and stores them globally.
-    
+
     This function implements a singleton pattern - it only initializes components
     once and reuses them for subsequent requests, improving performance.
-    
+
     Returns:
         bool: True if setup successful, False otherwise
     """
@@ -253,7 +254,7 @@ def _setup_rag_system():
         return True
 
     print("Setting up RAG system components...")
-    
+
     # Step 0: Initialize OpenTelemetry for observability
     if OTEL_AVAILABLE:
         try:
@@ -261,7 +262,7 @@ def _setup_rag_system():
             if _tracer_provider:
                 _tracer = trace.get_tracer("beeai-faq-agent")
                 print("✅ OpenTelemetry tracer initialized for observability")
-                
+
                 # Test span export to verify connectivity
                 otel_endpoint = os.getenv("OTEL_ENDPOINT", "http://localhost:4328")
                 span_test_success = test_span_export(_tracer_provider, otel_endpoint)
@@ -276,7 +277,7 @@ def _setup_rag_system():
             print("💡 Continuing without observability")
     else:
         print("⚠️  OpenTelemetry not available - running without observability")
-    
+
     # Step 1: Initialize the embedding model for converting text to vectors
     try:
         _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
@@ -326,13 +327,13 @@ def _setup_rag_system():
 class FAQTool(Tool):
     """
     A custom tool that extends the BeeAI Tool class to provide FAQ search functionality.
-    
+
     This tool uses semantic search to find relevant FAQ information by:
     1. Converting user queries to embeddings
     2. Searching the ChromaDB collection for similar FAQ embeddings
     3. Returning the most relevant FAQ content
     """
-    
+
     # Tool metadata for the BeeAI framework
     name: str = "faq_lookup_tool"
     description: str = "Searches the company's frequently asked questions for relevant answers using semantic search. Use this tool when the user asks a question about company policies, products, or general FAQs. Input should be a question string."
@@ -340,7 +341,7 @@ class FAQTool(Tool):
     class FAQToolInput(BaseModel):
         """
         Input schema for the FAQ tool, defining the expected input structure.
-        
+
         This ensures that the tool receives properly formatted input data.
         """
         query: str = Field(description="The question to lookup in the company FAQs.")
@@ -357,7 +358,7 @@ class FAQTool(Tool):
     def __init__(self, embedding_model: SentenceTransformer, chroma_collection: chromadb.Collection):
         """
         Initialize the FAQ tool with required components.
-        
+
         Args:
             embedding_model: Model for converting text to embeddings
             chroma_collection: ChromaDB collection containing FAQ data
@@ -369,15 +370,15 @@ class FAQTool(Tool):
     async def _run(self, query: str) -> str:
         """
         Main execution method for the FAQ tool.
-        
+
         This method performs semantic search by:
         1. Converting the query to embeddings
         2. Searching ChromaDB for similar FAQ content
         3. Formatting and returning the results
-        
+
         Args:
             query: The user's question to search for
-            
+
         Returns:
             str: Formatted FAQ information or error message
         """
@@ -388,31 +389,31 @@ class FAQTool(Tool):
                 span.set_attribute("tool.description", self.description)
                 span.set_attribute("faq.query", query)
                 span.set_attribute("faq.query_length", len(query))
-                
+
                 try:
                     # Step 1: Convert the user query to embeddings for semantic search
                     with _tracer.start_as_current_span("query_embedding") as embedding_span:
                         embedding_span.set_attribute("embedding.model", "sentence-transformers")
                         embedding_span.set_attribute("embedding.model_name", "all-MiniLM-L6-v2")
-                        
+
                         query_embedding = self.embedding_model.encode(query).tolist()
                         embedding_span.set_attribute("embedding.vector_size", len(query_embedding))
                         embedding_span.set_attribute("embedding.success", True)
-                    
+
                     # Step 2: Search ChromaDB for similar FAQ content using vector similarity
                     with _tracer.start_as_current_span("chroma_search") as search_span:
                         search_span.set_attribute("chroma.collection", CHROMA_COLLECTION_NAME)
                         search_span.set_attribute("chroma.n_results", 3)
-                        
+
                         results = self.chroma_collection.query(
                             query_embeddings=[query_embedding],  # Search using the query embedding
                             n_results=3,  # Return top 3 most similar results
                             include=['documents', 'metadatas']  # Include both content and metadata
                         )
-                        
+
                         search_span.set_attribute("chroma.results_count", len(results.get('documents', [[]])[0]) if results and results.get('documents') else 0)
                         search_span.set_attribute("chroma.search_success", True)
-                    
+
                     # Step 3: Process and format the search results
                     with _tracer.start_as_current_span("result_processing") as process_span:
                         retrieved_contexts = []
@@ -424,30 +425,30 @@ class FAQTool(Tool):
                                 question = metadata.get('question', 'N/A')  # Extract question from metadata
                                 answer = metadata.get('answer', doc_content)  # Extract answer or use content
                                 retrieved_contexts.append(f"Question: {question}\nAnswer: {answer}")
-                        
+
                         process_span.set_attribute("processing.contexts_count", len(retrieved_contexts))
                         process_span.set_attribute("processing.success", True)
-                    
+
                     # Step 4: Handle case where no relevant information is found
                     if not retrieved_contexts:
                         span.set_attribute("faq.no_results", True)
                         span.set_attribute("faq.status", "no_results")
                         return "No relevant information found in the FAQs."
-                    
+
                     # Step 5: Combine all retrieved contexts into a single formatted string
                     context_string = "\n\n".join(retrieved_contexts)
                     span.set_attribute("faq.results_found", True)
                     span.set_attribute("faq.status", "success")
                     span.set_attribute("faq.response_length", len(context_string))
-                    
+
                     return context_string
-                    
+
                 except Exception as e:
                     # Set span attributes for error
                     span.set_attribute("faq.status", "error")
                     span.set_attribute("error.message", str(e))
                     span.set_attribute("error.type", type(e).__name__)
-                    
+
                     # Log error for observability
                     print(f"Error in FAQ tool execution: {e}")
                     return f"Error processing query for FAQ lookup: {e}"
@@ -456,14 +457,14 @@ class FAQTool(Tool):
             try:
                 # Step 1: Convert the user query to embeddings for semantic search
                 query_embedding = self.embedding_model.encode(query).tolist()
-                
+
                 # Step 2: Search ChromaDB for similar FAQ content using vector similarity
                 results = self.chroma_collection.query(
                     query_embeddings=[query_embedding],  # Search using the query embedding
                     n_results=3,  # Return top 3 most similar results
                     include=['documents', 'metadatas']  # Include both content and metadata
                 )
-                
+
                 # Step 3: Process and format the search results
                 retrieved_contexts = []
                 if results and results.get('documents') and results['documents'][0]:
@@ -474,30 +475,30 @@ class FAQTool(Tool):
                         question = metadata.get('question', 'N/A')  # Extract question from metadata
                         answer = metadata.get('answer', doc_content)  # Extract answer or use content
                         retrieved_contexts.append(f"Question: {question}\nAnswer: {answer}")
-                
+
                 # Step 4: Handle case where no relevant information is found
                 if not retrieved_contexts:
                     return "No relevant information found in the FAQs."
-                
+
                 # Step 5: Combine all retrieved contexts into a single formatted string
                 context_string = "\n\n".join(retrieved_contexts)
                 return context_string
-                
+
             except Exception as e:
                 return f"Error processing query for FAQ lookup: {e}"
 
 async def run_faq_agent(user_query: str) -> str:
     """
     Main function to run the FAQ agent workflow.
-    
+
     This function orchestrates the entire FAQ answering process:
     1. Ensures the RAG system is properly initialized
     2. Searches for relevant FAQ information
     3. Generates a comprehensive answer using the LLM
-    
+
     Args:
         user_query: The user's question about company FAQs
-        
+
     Returns:
         str: The agent's response to the user's question
     """
@@ -508,7 +509,7 @@ async def run_faq_agent(user_query: str) -> str:
             span.set_attribute("workflow.query", user_query)
             span.set_attribute("workflow.query_length", len(user_query))
             span.set_attribute("workflow.timestamp", time.time())
-            
+
             try:
                 # Ensure the RAG system is set up before processing
                 with _tracer.start_as_current_span("rag_system_setup") as setup_span:
@@ -517,7 +518,7 @@ async def run_faq_agent(user_query: str) -> str:
                         span.set_attribute("workflow.status", "setup_failed")
                         return "Backend RAG system failed to initialize. Please check server logs."
                     setup_span.set_attribute("setup.status", "success")
-                
+
                 # Step 1: Manually call the FAQ tool to retrieve relevant information
                 print("Calling the faq_lookup_tool...")
                 with _tracer.start_as_current_span("faq_tool_execution") as tool_span:
@@ -525,11 +526,11 @@ async def run_faq_agent(user_query: str) -> str:
                     retrieved_info = await _faq_tool_instance._run(user_query)
                     tool_span.set_attribute("tool.response_length", len(retrieved_info))
                     tool_span.set_attribute("tool.success", True)
-               
+
                 # Step 2: Build a comprehensive prompt combining retrieved info and user question
                 # This gives the LLM context about relevant FAQs before asking it to answer
                 prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
-                
+
                 with _tracer.start_as_current_span("prompt_construction") as prompt_span:
                     prompt_span.set_attribute("prompt.retrieved_info_length", len(retrieved_info))
                     prompt_span.set_attribute("prompt.final_length", len(prompt_for_agent))
@@ -539,7 +540,7 @@ async def run_faq_agent(user_query: str) -> str:
                 with _tracer.start_as_current_span("agent_workflow_execution") as workflow_span:
                     workflow_span.set_attribute("workflow.agent_name", "FAQAgent")
                     workflow_span.set_attribute("workflow.llm_model", "openai:gpt-4o")
-                    
+
                     response = await _agent_workflow.run(
                         inputs=[
                             AgentWorkflowInput(
@@ -547,20 +548,20 @@ async def run_faq_agent(user_query: str) -> str:
                             )
                         ]
                     )
-                    
+
                     final_answer = response.result.final_answer
                     workflow_span.set_attribute("workflow.response_length", len(final_answer))
                     workflow_span.set_attribute("workflow.success", True)
                     span.set_attribute("workflow.status", "success")
-                    
+
                     return final_answer  # Extract the agent's response
-                    
+
             except Exception as e:
                 # Set span attributes for error
                 span.set_attribute("workflow.status", "error")
                 span.set_attribute("error.message", str(e))
                 span.set_attribute("error.type", type(e).__name__)
-                
+
                 print(f"Error running agent workflow: {e}")
                 return f"An error occurred while processing your request: {e}"
     else:
@@ -572,7 +573,7 @@ async def run_faq_agent(user_query: str) -> str:
         # Step 1: Manually call the FAQ tool to retrieve relevant information
         print("Calling the faq_lookup_tool...")
         retrieved_info = await _faq_tool_instance._run(user_query)
-       
+
         # Step 2: Build a comprehensive prompt combining retrieved info and user question
         # This gives the LLM context about relevant FAQs before asking it to answer
         prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
@@ -594,7 +595,7 @@ async def run_faq_agent(user_query: str) -> str:
 def get_observability_data() -> dict:
     """
     Get observability data for monitoring the RAG system.
-    
+
     Returns:
         dict: Dictionary containing observability metrics and status
     """
@@ -621,7 +622,7 @@ def get_observability_data() -> dict:
             "loaded": _embedding_model is not None
         },
         "status": "ready" if all([
-            _embedding_model, _chroma_collection, _llm, 
+            _embedding_model, _chroma_collection, _llm,
             _faq_tool_instance, _agent_workflow
         ]) else "initializing"
     }

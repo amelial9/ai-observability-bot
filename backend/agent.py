@@ -145,8 +145,8 @@ import chromadb  # Vector database for storing and searching FAQ embeddings
 
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'  # Lightweight but effective embedding model
-# Use path relative to project root (where uvicorn is started from)
-CHROMA_PERSIST_PATH = "my_chroma_db"  # Local path for ChromaDB storage
+# Use absolute path to match Docker volume mount: ./my_chroma_db:/app/my_chroma_db
+CHROMA_PERSIST_PATH = "/app/my_chroma_db"  # Local path for ChromaDB storage
 CHROMA_COLLECTION_NAME = "company_faqs"  # Collection name in ChromaDB
 
 # Global variables to store initialized components (singleton pattern)

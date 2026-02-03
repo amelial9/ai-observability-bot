@@ -1,73 +1,36 @@
-# backend/main.py
 import os
 import uuid
-
-# Load environment variables FIRST before importing modules that need them
-from dotenv import load_dotenv
-load_dotenv()
-
-from fastapi import FastAPI, Request, HTTPException
+from datetime import datetime
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel
+from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from openinference.instrumentation.beeai import BeeAIInstrumentor
-from contextlib import asynccontextmanager
 
-# Import OpenTelemetry for manual span tagging
-from opentelemetry import trace
+# Import live agent system components
+from models import (
+    ChatRequest, ChatResponse, SessionState, ChatMessage,
+    HandoffRequest, SessionInfo, AgentInfo
+)
+from live_agent_system import session_manager
+from websocket_manager import connection_manager
 
-# Import existing modules
+# Observability Import with Graceful Degradation
+try:
+    from openinference.instrumentation.beeai import BeeAIInstrumentor
+except ImportError:
+    BeeAIInstrumentor = None
+
 from agent import run_faq_agent, _setup_rag_system
 
-# Import new sentiment analysis modules
-from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
-from email_service import EmailService
-
-# Initialize sentiment analysis components
-sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
-conversation_tracker = ConversationTracker(frustration_threshold=0.6, trigger_count=3)
-email_service = EmailService()
-
-# Simple global counter for frustrated messages
-global_frustrated_count = 0
-global_conversation_history = []
-escalation_triggered = False
-waiting_for_representative = False
-user_responded_to_escalation = False
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Modern lifespan context manager for FastAPI startup/shutdown events."""
-    # Startup
-    print("FastAPI startup event: Initializing RAG system...")
-    success = _setup_rag_system()
-    if not success:
-        print("RAG system initialization failed during startup.")
-    else:
-        print("RAG system initialized successfully.")
-    
-    # Test email service connection
-    print("\nTesting email service configuration...")
-    email_service.test_connection()
-    
-    BeeAIInstrumentor().instrument()
-    print("\n✅ Sentiment Analysis and Escalation System Enabled")
-    print(f"   Frustration Threshold: {sentiment_analyzer.frustration_threshold}")
-    print(f"   Escalation Trigger: {conversation_tracker.trigger_count} frustrated messages")
-    
-    yield
-    
-    # Shutdown (if needed)
-    print("Shutting down...")
+load_dotenv()
 
 app = FastAPI(
-    title="Company FAQ RAG API",
-    description="Backend API for the Company FAQ Retrieval Augmented Generation (RAG) system with Sentiment Analysis.",
+    title="Company FAQ RAG API with Live Agent Handoff",
+    description="Backend API for the Company FAQ Retrieval Augmented Generation (RAG) system with live agent support.",
     version="2.0.0",
-    lifespan=lifespan
 )
 
 origins = [
@@ -76,6 +39,7 @@ origins = [
     "http://127.0.0.1:8080",
     "http://0.0.0.0:8000",
     "http://localhost:8001",
+    "http://127.0.0.1:8001",
 ]
 
 app.add_middleware(
@@ -86,25 +50,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 app.mount(
     "/static",
-    StaticFiles(directory="frontend/static"),
+    StaticFiles(directory="../frontend/static"),
     name="static"
 )
+templates = Jinja2Templates(directory="../frontend")
 
-templates = Jinja2Templates(directory="frontend")
 
-class ChatRequest(BaseModel):
-    query: str
-    session_id: Optional[str] = None
+@app.on_event("startup")
+async def startup_event():
+    """Initializes the RAG system when the FastAPI app starts up."""
+    print("FastAPI startup event: Initializing RAG system...")
+    success = _setup_rag_system()
+    if not success:
+        print("RAG system initialization failed during startup.")
+    else:
+        print("RAG system initialized successfully.")
+    
+    # Initialize BeeAI Instrumentor if available
+    if BeeAIInstrumentor:
+        try:
+            BeeAIInstrumentor().instrument()
+            print("BeeAI Instrumentor initialized.")
+        except Exception as e:
+            print(f"Failed to initialize BeeAI Instrumentor: {e}")
 
-class ChatResponse(BaseModel):
-    answer: str
-    sentiment_score: float
-    frustrated_count: int
-    should_escalate: bool
-    escalation_message: Optional[str] = None
-    session_id: str
+
+# ============================================================================
+# CUSTOMER ENDPOINTS
+# ============================================================================
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend(request: Request):
@@ -114,248 +90,315 @@ async def serve_frontend(request: Request):
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request_body: ChatRequest):
     """
-    Enhanced chat endpoint with sentiment analysis and escalation detection.
-    Uses simple global counter to track frustrated messages.
+    Main chat endpoint that handles both AI and live agent routing.
+    Detects handoff keywords and manages session state.
     """
-    global global_frustrated_count, global_conversation_history, escalation_triggered, waiting_for_representative, user_responded_to_escalation
-    
     user_query = request_body.query
     session_id = request_body.session_id
     
+    print(f"Received query: {user_query}")
+    
+    # Create or get session
     if not session_id:
-        session_id = str(uuid.uuid4())
+        session_id = session_manager.create_session()
+        print(f"Created new session: {session_id}")
     
-    # --- OPENTELEMETRY FIX: Tag the current span with session_id ---
-    current_span = trace.get_current_span()
-    if current_span:  # Check if a span is active (it should be, via auto-instrumentation)
-        current_span.set_attribute("session.id", session_id)
-        current_span.set_attribute("session_id", session_id)  # Alternative format for compatibility
-        print(f"✅ Session ID tagged in OpenTelemetry span: {session_id[:8]}...")
-    # --- End Fix ---
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
     
-    print(f"\n{'='*60}")
-    print(f"📨 Received query")
-    print(f"   Session ID: {session_id[:8]}...")
-    print(f"   Query: {user_query}")
+    # Add customer message to history
+    session_manager.add_message(session_id, ChatMessage(
+        sender="customer",
+        content=user_query
+    ))
     
-    # Check if user is responding to escalation notice (ONLY ONCE after notification)
-    if escalation_triggered and not user_responded_to_escalation:
-        user_query_lower = user_query.lower()
+    # Check if customer wants to talk to a live agent
+    if session_manager.detect_handoff_request(user_query):
+        print(f"Handoff request detected for session {session_id}")
+        session_manager.request_handoff(session_id)
         
-        # Keywords indicating user wants to wait for representative
-        wait_keywords = ['wait', 'representative', 'rep', 'human', 'person', 'agent', 'support', 'team']
-        # Keywords indicating user wants to continue chatting
-        continue_keywords = ['continue', 'chat', 'keep going', 'go on', 'help me', 'no']
-        
-        wants_to_wait = any(keyword in user_query_lower for keyword in wait_keywords)
-        wants_to_continue = any(keyword in user_query_lower for keyword in continue_keywords)
-        
-        if wants_to_wait:
-            user_responded_to_escalation = True
-            waiting_for_representative = True
-            agent_answer = (
-                "Thank you for your patience. A support representative has been notified and will contact you shortly. "
-                "You should receive a follow-up within the next hour. Is there anything else I can note for the representative?"
-            )
-            print("✅ User chose to wait for representative")
-            print("🔒 User response to escalation recorded - keyword detection disabled")
-            
-            return ChatResponse(
-                answer=agent_answer,
-                sentiment_score=0.0,
-                frustrated_count=global_frustrated_count,
-                should_escalate=False,
-                escalation_message=None,
-                session_id=session_id
-            )
-        
-        elif wants_to_continue:
-            user_responded_to_escalation = True
-            print("✅ User chose to continue chatting")
-            print("🔒 User response to escalation recorded - keyword detection disabled")
-    
-    # If user is waiting for representative, give holding response
-    if waiting_for_representative:
-        agent_answer = (
-            "I understand you're waiting for a representative. They have been notified and will reach out soon. "
-            "I've passed along your message. Is there anything else you'd like me to add to the notes for them?"
-        )
-        print("ℹ️  User is waiting for representative - providing holding response")
-        
-        return ChatResponse(
-            answer=agent_answer,
-            sentiment_score=0.0,
-            frustrated_count=global_frustrated_count,
-            should_escalate=False,
-            escalation_message=None,
-            session_id=session_id
-        )
-    
-    try:
-        # Step 1: Get response from RAG agent
-        agent_answer = await run_faq_agent(user_query)
-        print(f"Agent response generated ({len(agent_answer)} chars)")
-        
-        # Step 2: Analyze sentiment of user message
-        sentiment_score = await sentiment_analyzer.analyze_sentiment(user_query)
-        print(f"Sentiment score: {sentiment_score:.2f}")
-        
-        # Tag sentiment score in OpenTelemetry span
-        if current_span:
-            current_span.set_attribute("sentiment.score", sentiment_score)
-        
-        # Categorize sentiment for logging
-        if sentiment_score < 0.3:
-            sentiment_label = "😊 Neutral/Positive"
-            sentiment_category = "neutral_positive"
-        elif sentiment_score < 0.6:
-            sentiment_label = "😐 Slightly Frustrated"
-            sentiment_category = "slightly_frustrated"
-        elif sentiment_score < 0.8:
-            sentiment_label = "😠 Moderately Frustrated"
-            sentiment_category = "moderately_frustrated"
-        else:
-            sentiment_label = "😡 Highly Frustrated"
-            sentiment_category = "highly_frustrated"
-        
-        print(f"Sentiment: {sentiment_label}")
-        
-        # Tag sentiment category in OpenTelemetry span
-        if current_span:
-            current_span.set_attribute("sentiment.category", sentiment_category)
-            current_span.set_attribute("sentiment.label", sentiment_label)
-        
-        # Step 3: Simple counter - increment if frustrated
-        if sentiment_score >= 0.6:
-            global_frustrated_count += 1
-            print(f"✅ Frustrated message detected! Count: {global_frustrated_count}/3")
-        else:
-            print(f"📊 Not frustrated. Count remains: {global_frustrated_count}/3")
-        
-        # Tag frustrated count in OpenTelemetry span
-        if current_span:
-            current_span.set_attribute("frustrated.count", global_frustrated_count)
-            current_span.set_attribute("frustrated.threshold", 3)
-            current_span.set_attribute("frustrated.detected", sentiment_score >= 0.6)
-        
-        # Store message in history
-        global_conversation_history.append({
-            "user_message": user_query,
-            "bot_response": agent_answer,
-            "sentiment_score": sentiment_score
+        # Notify all connected agents about new customer in queue
+        await connection_manager.broadcast_to_all_agents({
+            "type": "new_customer",
+            "session_id": session_id,
+            "message": "New customer waiting in queue"
         })
         
-        escalation_message = None
-        should_escalate = False
-        
-        # Step 4: Check if we should escalate
-        if global_frustrated_count >= 3 and not escalation_triggered:
-            should_escalate = True
-            escalation_triggered = True
-            print("\n🚨 ESCALATION TRIGGERED!")
-            
-            # Tag escalation in OpenTelemetry span
-            if current_span:
-                current_span.set_attribute("escalation.triggered", True)
-                current_span.set_attribute("escalation.session_id", session_id)
-            
-            try:
-                # Generate summary from conversation history
-                summary_text = f"""ESCALATED CONVERSATION SUMMARY
-{'='*50}
-
-CONVERSATION HISTORY:
-"""
-                for i, msg in enumerate(global_conversation_history, 1):
-                    summary_text += f"\nMessage {i} (Score: {msg['sentiment_score']:.2f}):\n"
-                    summary_text += f"User: {msg['user_message']}\n"
-                    summary_text += f"Bot: {msg['bot_response']}\n"
-                
-                summary_text += f"""
-FRUSTRATION METRICS:
-- Total Frustrated Messages: {global_frustrated_count}
-- Total Messages: {len(global_conversation_history)}
-- Average Sentiment Score: {sum(m['sentiment_score'] for m in global_conversation_history) / len(global_conversation_history):.2f}
-"""
-                
-                print("\n📧 Attempting to send escalation email...")
-                email_sent = email_service.send_escalation_email(
-                    conversation_summary=summary_text,
-                    session_id=session_id
-                )
-                
-                # Tag email status in OpenTelemetry span
-                if current_span:
-                    current_span.set_attribute("email.sent", email_sent)
-                    current_span.set_attribute("email.recipient", email_service.recipient_email or "not_configured")
-                
-                if email_sent:
-                    print("✅ Escalation email sent successfully!")
-                else:
-                    print("⚠️ Email failed to send - check configuration")
-                
-            except Exception as email_error:
-                print(f"❌ Error during escalation process: {email_error}")
-            
-            escalation_message = (
-                "I notice you may be experiencing some frustration. "
-                "I've notified our support team, and a representative will reach out to you shortly. "
-                "Would you like to continue chatting with me, or would you prefer to wait for a representative?"
-            )
-            
-            print(f"\n📧 Escalation Process Complete")
-            print(f"🔓 Keyword detection enabled for next user message")
-            print(f"{'='*60}\n")
-        
-        # Step 5: Return response
-        return ChatResponse(
-            answer=agent_answer,
-            sentiment_score=sentiment_score,
-            frustrated_count=global_frustrated_count,
-            should_escalate=should_escalate,
-            escalation_message=escalation_message,
-            session_id=session_id
+        response_text = (
+            "I'll connect you with a live agent right away. "
+            "Please wait a moment while I find someone to help you..."
         )
         
+        session_manager.add_message(session_id, ChatMessage(
+            sender="system",
+            content=response_text
+        ))
+        
+        return ChatResponse(
+            answer=response_text,
+            session_id=session_id,
+            state=SessionState.WAITING_FOR_AGENT
+        )
+    
+    # If session is in live agent mode, don't process with AI
+    if session.state == SessionState.LIVE_AGENT:
+        return ChatResponse(
+            answer="You are currently connected to a live agent. Please use the chat to communicate.",
+            session_id=session_id,
+            state=session.state,
+            agent_name=session.agent_name
+        )
+    
+    # If session is waiting for agent, remind them
+    if session.state == SessionState.WAITING_FOR_AGENT:
+        return ChatResponse(
+            answer="Please wait, we're connecting you with a live agent...",
+            session_id=session_id,
+            state=session.state
+        )
+    
+    # Process with AI agent
+    try:
+        agent_answer = await run_faq_agent(user_query)
+        
+        session_manager.add_message(session_id, ChatMessage(
+            sender="agent",
+            content=agent_answer
+        ))
+        
+        return ChatResponse(
+            answer=agent_answer,
+            session_id=session_id,
+            state=session.state
+        )
     except Exception as e:
         print(f"Error processing chat request: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
-@app.get("/session/{session_id}/history")
-async def get_session_history(session_id: str):
-    """Get conversation history."""
+
+@app.websocket("/ws/customer/{session_id}")
+async def customer_websocket(websocket: WebSocket, session_id: str):
+    """WebSocket endpoint for customer real-time chat."""
+    await connection_manager.connect_customer(session_id, websocket)
+    session_manager.set_customer_connected(session_id, True)
+    
+    try:
+        while True:
+            # Receive message from customer
+            data = await websocket.receive_json()
+            message_type = data.get("type")
+            
+            if message_type == "message":
+                content = data.get("content", "")
+                session = session_manager.get_session(session_id)
+                
+                if not session:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Session not found"
+                    })
+                    break
+                
+                # Add to history
+                session_manager.add_message(session_id, ChatMessage(
+                    sender="customer",
+                    content=content
+                ))
+                
+                # If in live agent mode, forward to agent
+                if session.state == SessionState.LIVE_AGENT and session.agent_id:
+                    await connection_manager.send_to_agent(session.agent_id, {
+                        "type": "customer_message",
+                        "session_id": session_id,
+                        "content": content,
+                        "timestamp": datetime.now().isoformat()
+                    })
+            
+            elif message_type == "typing":
+                # Forward typing indicator to agent
+                session = session_manager.get_session(session_id)
+                if session and session.state == SessionState.LIVE_AGENT and session.agent_id:
+                    await connection_manager.send_to_agent(session.agent_id, {
+                        "type": "customer_typing",
+                        "session_id": session_id,
+                        "is_typing": data.get("is_typing", False)
+                    })
+    
+    except WebSocketDisconnect:
+        print(f"Customer WebSocket disconnected: {session_id}")
+    except Exception as e:
+        print(f"Error in customer WebSocket: {e}")
+    finally:
+        connection_manager.disconnect_customer(session_id)
+        session_manager.set_customer_connected(session_id, False)
+
+
+# ============================================================================
+# AGENT DASHBOARD ENDPOINTS
+# ============================================================================
+
+@app.get("/agent-dashboard", response_class=HTMLResponse)
+async def serve_agent_dashboard(request: Request):
+    """Serve the agent dashboard HTML page."""
+    return templates.TemplateResponse("agent-dashboard.html", {"request": request})
+
+
+@app.post("/api/agent/login")
+async def agent_login(agent_id: str, name: str):
+    """Register/login an agent."""
+    agent = session_manager.register_agent(agent_id, name)
     return {
-        "frustrated_count": global_frustrated_count,
-        "total_messages": len(global_conversation_history),
-        "escalation_triggered": escalation_triggered,
-        "messages": global_conversation_history
+        "success": True,
+        "agent": {
+            "agent_id": agent.agent_id,
+            "name": agent.name,
+            "is_available": agent.is_available
+        }
     }
 
-@app.post("/session/reset")
-async def reset_session():
-    """Reset the global frustrated counter and conversation history."""
-    global global_frustrated_count, global_conversation_history, escalation_triggered, waiting_for_representative, user_responded_to_escalation
-    
-    global_frustrated_count = 0
-    global_conversation_history = []
-    escalation_triggered = False
-    waiting_for_representative = False
-    user_responded_to_escalation = False
-    
-    return {"message": "Session reset successfully", "frustrated_count": 0}
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for monitoring."""
+@app.get("/api/agent/queue")
+async def get_waiting_queue():
+    """Get list of customers waiting for an agent."""
+    waiting_sessions = session_manager.get_waiting_sessions()
     return {
-        "status": "healthy",
-        "rag_system": "operational",
-        "sentiment_analysis": "enabled",
-        "email_service": "configured" if email_service.recipient_email else "not_configured",
-        "frustrated_count": global_frustrated_count,
-        "total_messages": len(global_conversation_history),
-        "escalation_triggered": escalation_triggered
+        "queue": [
+            {
+                "session_id": session.session_id,
+                "created_at": session.created_at.isoformat(),
+                "message_count": len(session.messages),
+                "last_message": session.messages[-1].content if session.messages else None
+            }
+            for session in waiting_sessions
+        ]
     }
+
+
+@app.post("/api/agent/accept/{session_id}")
+async def accept_chat(session_id: str, agent_id: str):
+    """Agent accepts a customer chat."""
+    success = session_manager.assign_agent(session_id, agent_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to assign agent")
+    
+    session = session_manager.get_session(session_id)
+    
+    # Notify customer via WebSocket
+    await connection_manager.send_to_customer(session_id, {
+        "type": "agent_joined",
+        "agent_name": session.agent_name,
+        "message": f"{session.agent_name} has joined the chat"
+    })
+    
+    return {
+        "success": True,
+        "session": {
+            "session_id": session.session_id,
+            "state": session.state,
+            "agent_name": session.agent_name,
+            "messages": [
+                {
+                    "sender": msg.sender,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp.isoformat(),
+                    "agent_name": msg.agent_name
+                }
+                for msg in session.messages
+            ]
+        }
+    }
+
+
+@app.post("/api/agent/end/{session_id}")
+async def end_agent_session_endpoint(session_id: str, return_to_ai: bool = False):
+    """End an agent session."""
+    success = session_manager.end_agent_session(session_id, return_to_ai)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to end session")
+    
+    # Notify customer
+    await connection_manager.send_to_customer(session_id, {
+        "type": "agent_left",
+        "return_to_ai": return_to_ai,
+        "message": "Agent has left the chat" if not return_to_ai else "Agent has left. You can continue with AI assistant."
+    })
+    
+    return {"success": True}
+
+
+@app.get("/api/agent/sessions/{agent_id}")
+async def get_agent_sessions(agent_id: str):
+    """Get all active sessions for an agent."""
+    sessions = session_manager.get_agent_sessions(agent_id)
+    return {
+        "sessions": [
+            {
+                "session_id": session.session_id,
+                "state": session.state,
+                "created_at": session.created_at.isoformat(),
+                "message_count": len(session.messages)
+            }
+            for session in sessions
+        ]
+    }
+
+
+@app.websocket("/ws/agent/{agent_id}")
+async def agent_websocket(websocket: WebSocket, agent_id: str):
+    """WebSocket endpoint for agent real-time communication."""
+    await connection_manager.connect_agent(agent_id, websocket)
+    
+    try:
+        while True:
+            # Receive message from agent
+            data = await websocket.receive_json()
+            message_type = data.get("type")
+            
+            if message_type == "message":
+                session_id = data.get("session_id")
+                content = data.get("content", "")
+                
+                session = session_manager.get_session(session_id)
+                if not session:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Session not found"
+                    })
+                    continue
+                
+                # Add to history
+                session_manager.add_message(session_id, ChatMessage(
+                    sender="agent",
+                    content=content,
+                    agent_name=session.agent_name
+                ))
+                
+                # Forward to customer
+                await connection_manager.send_to_customer(session_id, {
+                    "type": "agent_message",
+                    "content": content,
+                    "agent_name": session.agent_name,
+                    "timestamp": datetime.now().isoformat()
+                })
+            
+            elif message_type == "typing":
+                # Forward typing indicator to customer
+                session_id = data.get("session_id")
+                await connection_manager.send_to_customer(session_id, {
+                    "type": "agent_typing",
+                    "is_typing": data.get("is_typing", False)
+                })
+    
+    except WebSocketDisconnect:
+        print(f"Agent WebSocket disconnected: {agent_id}")
+    except Exception as e:
+        print(f"Error in agent WebSocket: {e}")
+    finally:
+        connection_manager.disconnect_agent(agent_id)
+
 
 if __name__ == "__main__":
     import uvicorn

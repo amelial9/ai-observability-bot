@@ -4,12 +4,10 @@ import chromadb
 import os
 
 
-# When running extraction.py directly, work from backend directory
-# So paths are relative to backend/
-EXCEL_PATH = "../Pemco_faqs.xlsx"  # Points to project root
-EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
+EXCEL_PATH = "../higherleaf_faqs_all.xlsx"
+EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2' 
 CHROMA_COLLECTION_NAME = "company_faqs"
-CHROMA_PERSIST_PATH = "../my_chroma_db"  # Points to project root ChromaDB
+CHROMA_PERSIST_PATH = "../my_chroma_db"
 
 # 1. Load data from Excel
 def load_faqs_from_excel(excel_path):
@@ -59,10 +57,10 @@ def initialize_rag_components():
     try:
         # Ensure the directory exists. os.makedirs creates it if it doesn't.
         os.makedirs(CHROMA_PERSIST_PATH, exist_ok=True)
-
+        
         # Connect to the persistent ChromaDB client
         chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
-
+        
         # Get or create the collection. If it exists, it will load. If not, it will be created.
         collection = chroma_client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
         print(f"ChromaDB collection '{CHROMA_COLLECTION_NAME}' ready and connected.")
@@ -83,7 +81,7 @@ def index_faqs_to_chroma(faqs_data, embedding_model, collection):
         return
 
     print("Indexing FAQs into vector database...")
-
+    
     documents = [faq['content_to_embed'] for faq in faqs_data]
     metadatas = [{"question": faq['question'], "answer": faq['answer']} for faq in faqs_data]
     ids = [f"faq_{i}" for i in range(len(faqs_data))]
@@ -125,13 +123,13 @@ def index_faqs_to_chroma(faqs_data, embedding_model, collection):
 
 if __name__ == "__main__":
     print("--- Starting FAQ Indexing Script ---")
-
+    
     faqs_data = load_faqs_from_excel(EXCEL_PATH)
-
+    
     if faqs_data is not None:
         embedding_model, collection = initialize_rag_components()
-
-        if embedding_model is not None and collection is not None:
+        
+        if embedding_model is not None and collection is not None: 
             index_faqs_to_chroma(faqs_data, embedding_model, collection)
             print("\n--- Indexing Process Complete ---")
             print(f"Your vector database is now persisted on disk at: '{CHROMA_PERSIST_PATH}'")

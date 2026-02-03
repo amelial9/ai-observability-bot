@@ -1,18 +1,16 @@
-# Existing requirements
 fastapi
-uvicorn[standard]
-python-dotenv
-jinja2
-openinference-instrumentation-beeai
-opentelemetry-sdk
-opentelemetry-api
+uvicorn[standard] # For running the FastAPI server
+python-dotenv     # For loading .env files
+jinja2            # If you want to serve HTML templates directly from FastAPI (optional, but good to know)
+beeai-framework 
 chromadb
-sentence-transformers
 pandas
+sentence-transformers
 openpyxl
-OpenLIT
 
-# New requirements for sentiment analysis and email
-openai>=1.0.0
-
+openinference-instrumentation-beeai
+openlit
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
 dotenv

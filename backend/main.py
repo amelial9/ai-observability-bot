@@ -45,8 +45,8 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins for Squarespace embedding
+    allow_credentials=False,  # Must be False when allow_origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -69,6 +69,19 @@ app.mount(
     name="static"
 )
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring and load balancers."""
+    from agent import get_observability_data
+    obs_data = get_observability_data()
+    return {
+        "status": "healthy" if obs_data.get("status") == "ready" else "initializing",
+        "service": "ai-observability-bot",
+        "rag_system": obs_data.get("rag_system", {}),
+        "chroma_db": obs_data.get("chroma_db", {})
+    }
 
 
 @app.on_event("startup")
@@ -120,10 +133,16 @@ async def chat_endpoint(request_body: ChatRequest):
     if not session_id:
         session_id = session_manager.create_session()
         print(f"Created new session: {session_id}")
+    else:
+        # Check if session exists, if not create a new one
+        session = session_manager.get_session(session_id)
+        if not session:
+            print(f"Session {session_id} not found, creating new session")
+            session_id = session_manager.create_session()
     
     session = session_manager.get_session(session_id)
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=500, detail="Failed to create session")
     
     # Add customer message to history
     session_manager.add_message(session_id, ChatMessage(

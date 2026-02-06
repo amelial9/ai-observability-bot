@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
+
 <body>
 
     <div class="main-content">
@@ -19,11 +21,20 @@
 
     <div class="chat-container chat-container-closed" id="chat-container">
         <div class="chat-header">
-            <h3>Company FAQ Assistant</h3>
+            <div>
+                <h3>Company FAQ Assistant</h3>
+                <div id="agent-status" class="agent-status" style="display: none;">
+                    <i class="fas fa-circle status-indicator"></i>
+                    Connected to <span id="agent-name">Agent</span>
+                </div>
+            </div>
             <button id="close-button" class="close-button">&times;</button>
         </div>
         <div class="chat-history" id="chat-history">
             <div class="message bot-message">Hello! How can I help you with company FAQs today?</div>
+        </div>
+        <div id="typing-indicator" class="typing-indicator" style="display: none;">
+            <span></span><span></span><span></span>
         </div>
         <div class="chat-input-area">
             <input type="text" id="user-input" placeholder="Ask a question..." autocomplete="off">
@@ -34,4 +45,5 @@
 
     <script src="/static/script.js"></script>
 </body>
+
 </html>

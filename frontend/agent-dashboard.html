@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Agent Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/agent-dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-container">
+            <h1><i class="fas fa-headset"></i> Agent Dashboard</h1>
+            <p>Sign in to start helping customers</p>
+            <input type="text" id="agent-name-input" placeholder="Enter your name" autocomplete="off">
+            <button id="login-button">Sign In</button>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="dashboard" style="display: none;">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-left">
+                <h1><i class="fas fa-headset"></i> Live Agent Dashboard</h1>
+            </div>
+            <div class="header-right">
+                <span class="agent-info">
+                    <i class="fas fa-user-circle"></i>
+                    <span id="logged-agent-name"></span>
+                </span>
+                <button id="logout-button" class="logout-button">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="dashboard-content">
+            <!-- Left Sidebar - Queue -->
+            <aside class="queue-sidebar">
+                <div class="sidebar-header">
+                    <h2><i class="fas fa-users"></i> Waiting Queue</h2>
+                    <span id="queue-count" class="badge">0</span>
+                </div>
+                <div id="queue-list" class="queue-list">
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <p>No customers waiting</p>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Chat Area -->
+            <main class="chat-area">
+                <div id="no-chat-selected" class="no-chat-selected">
+                    <i class="fas fa-comments"></i>
+                    <h2>No Active Chat</h2>
+                    <p>Accept a customer from the queue to start chatting</p>
+                </div>
+
+                <div id="active-chat" class="active-chat" style="display: none;">
+                    <div class="chat-header">
+                        <div class="chat-header-info">
+                            <h3 id="customer-session-id">Customer</h3>
+                            <span id="chat-duration" class="chat-duration">00:00</span>
+                        </div>
+                        <div class="chat-actions">
+                            <button id="end-chat-button" class="btn-secondary">
+                                <i class="fas fa-times-circle"></i> End Chat
+                            </button>
+                            <button id="return-to-ai-button" class="btn-primary">
+                                <i class="fas fa-robot"></i> Return to AI
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="chat-messages" class="chat-messages">
+                        <!-- Messages will be inserted here -->
+                    </div>
+
+                    <div id="customer-typing-indicator" class="typing-indicator" style="display: none;">
+                        Customer is typing...
+                    </div>
+
+                    <div class="chat-input-container">
+                        <textarea id="agent-message-input" placeholder="Type your message..." rows="3"></textarea>
+                        <button id="send-message-button" class="btn-send">
+                            <i class="fas fa-paper-plane"></i> Send
+                        </button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="/static/agent-dashboard.js"></script>
+</body>
+
+</html>

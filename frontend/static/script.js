@@ -1,5 +1,9 @@
-// frontend/static/script.js
 document.addEventListener('DOMContentLoaded', () => {
+    let sessionId = null;
+    let websocket = null;
+    let isConnectedToAgent = false;
+    let typingTimeout = null;
+
     const chatHistory = document.getElementById('chat-history');
     const userInput = document.getElementById('user-input');
     const sendButton = document.getElementById('send-button');
@@ -7,99 +11,102 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatWidgetButton = document.getElementById('chat-widget-button');
     const chatContainer = document.getElementById('chat-container');
     const closeButton = document.getElementById('close-button');
-    
-    const API_URL = 'http://127.0.0.1:8001/chat';
-    
-    // Generate session ID once per page load
-    let sessionId = sessionStorage.getItem('chat_session_id');
-    if (!sessionId) {
-        sessionId = generateSessionId();
-        sessionStorage.setItem('chat_session_id', sessionId);
-    }
-    
-    function generateSessionId() {
-        return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    }
-    
+    const agentStatus = document.getElementById('agent-status');
+    const agentNameSpan = document.getElementById('agent-name');
+    const typingIndicator = document.getElementById('typing-indicator');
+
+    const API_URL = '/chat';
+
     function addMessage(text, sender) {
         const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message', `${sender}-message`);
+        messageDiv.classList.add('message');
+
+        if (sender === 'user') {
+            messageDiv.classList.add('user-message');
+        } else if (sender === 'bot') {
+            messageDiv.classList.add('bot-message');
+        } else if (sender === 'system') {
+            messageDiv.classList.add('system-message');
+        }
+
         messageDiv.textContent = text;
         chatHistory.appendChild(messageDiv);
         chatHistory.scrollTop = chatHistory.scrollHeight;
     }
-    
-    function addEscalationNotice(escalationMessage) {
-        const noticeDiv = document.createElement('div');
-        noticeDiv.classList.add('message', 'system-message');
-        noticeDiv.style.cssText = `
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 16px;
-            margin: 12px 0;
-            border-radius: 12px;
-            border-left: 4px solid #f59e0b;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        `;
-        
-        const icon = document.createElement('div');
-        icon.style.cssText = 'font-size: 24px; margin-bottom: 8px;';
-        icon.textContent = '🔔';
-        
-        const title = document.createElement('div');
-        title.style.cssText = 'font-weight: bold; font-size: 14px; margin-bottom: 8px;';
-        title.textContent = 'Support Team Notified';
-        
-        const message = document.createElement('div');
-        message.style.cssText = 'font-size: 13px; line-height: 1.5;';
-        message.textContent = escalationMessage;
-        
-        noticeDiv.appendChild(icon);
-        noticeDiv.appendChild(title);
-        noticeDiv.appendChild(message);
-        
-        chatHistory.appendChild(noticeDiv);
-        chatHistory.scrollTop = chatHistory.scrollHeight;
-    }
-    
+
+    // Typing indicator for customer
+    userInput.addEventListener('input', () => {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+            // Send typing indicator
+            websocket.send(JSON.stringify({
+                type: 'typing',
+                is_typing: true
+            }));
+
+            // Clear previous timeout
+            clearTimeout(typingTimeout);
+
+            // Stop typing after 2 seconds of inactivity
+            typingTimeout = setTimeout(() => {
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({
+                        type: 'typing',
+                        is_typing: false
+                    }));
+                }
+            }, 2000);
+        }
+    });
+
     async function sendMessage() {
         const query = userInput.value.trim();
         if (query === '') return;
-        
-        // Display user message immediately
+
         addMessage(query, 'user');
         userInput.value = '';
-        
+
+        // If connected to live agent via WebSocket, send through WebSocket
+        if (isConnectedToAgent && websocket && websocket.readyState === WebSocket.OPEN) {
+            websocket.send(JSON.stringify({
+                type: 'message',
+                content: query
+            }));
+            return;
+        }
+
         sendButton.disabled = true;
         loadingIndicator.style.display = 'block';
-        
+
         try {
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     query: query,
                     session_id: sessionId
                 }),
             });
-            
+
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
             }
-            
+
             const data = await response.json();
-            
-            // Display bot response
-            addMessage(data.answer, 'bot');
-            
-            // Display escalation notice if triggered
-            if (data.should_escalate && data.escalation_message) {
-                addEscalationNotice(data.escalation_message);
+
+            // Update session ID
+            if (data.session_id) {
+                sessionId = data.session_id;
             }
-            
+
+            addMessage(data.answer, 'bot');
+
+            // If state changed to waiting_for_agent, establish WebSocket
+            if (data.state === 'waiting_for_agent') {
+                connectWebSocket();
+            }
         } catch (error) {
             console.error('Error sending message:', error);
             addMessage(`Sorry, there was an error processing your request: ${error.message}`, 'bot');
@@ -109,28 +116,94 @@ document.addEventListener('DOMContentLoaded', () => {
             userInput.focus();
         }
     }
-    
+
+    function connectWebSocket() {
+        if (!sessionId) {
+            console.error('No session ID available');
+            return;
+        }
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/customer/${sessionId}`;
+
+        console.log('Connecting to WebSocket:', wsUrl);
+        websocket = new WebSocket(wsUrl);
+
+        websocket.onopen = () => {
+            console.log('WebSocket connected');
+        };
+
+        websocket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('WebSocket message:', data);
+
+            switch (data.type) {
+                case 'agent_joined':
+                    isConnectedToAgent = true;
+                    agentStatus.style.display = 'flex';
+                    agentNameSpan.textContent = data.agent_name;
+                    addMessage(data.message, 'system');
+                    break;
+
+                case 'agent_message':
+                    addMessage(data.content, 'bot');
+                    break;
+
+                case 'agent_left':
+                    isConnectedToAgent = data.return_to_ai || false;
+                    if (!isConnectedToAgent) {
+                        agentStatus.style.display = 'none';
+                    }
+                    addMessage(data.message, 'system');
+                    break;
+
+                case 'agent_typing':
+                    if (data.is_typing) {
+                        typingIndicator.style.display = 'flex';
+                    } else {
+                        typingIndicator.style.display = 'none';
+                    }
+                    break;
+
+                case 'error':
+                    addMessage(data.message, 'system');
+                    break;
+            }
+        };
+
+        websocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        websocket.onclose = () => {
+            console.log('WebSocket disconnected');
+            // Attempt to reconnect after 3 seconds if still connected to agent
+            if (isConnectedToAgent) {
+                setTimeout(() => {
+                    console.log('Attempting to reconnect...');
+                    connectWebSocket();
+                }, 3000);
+            }
+        };
+    }
+
     chatWidgetButton.addEventListener('click', () => {
         chatContainer.classList.remove('chat-container-closed');
         chatContainer.classList.add('chat-container-open');
         userInput.focus();
     });
-    
+
     closeButton.addEventListener('click', () => {
         chatContainer.classList.remove('chat-container-open');
         chatContainer.classList.add('chat-container-closed');
     });
-    
+
     sendButton.addEventListener('click', sendMessage);
-    
     userInput.addEventListener('keypress', (event) => {
         if (event.key === 'Enter') {
             sendMessage();
         }
     });
-    
-    // Add initial welcome message
-    setTimeout(() => {
-        addMessage('Hello! How can I help you today? Feel free to ask me any questions about our company FAQs.', 'bot');
-    }, 500);
+
+    console.log('Chat widget initialized');
 });

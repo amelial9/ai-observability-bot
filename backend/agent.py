@@ -137,7 +137,8 @@ import chromadb
 
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
-CHROMA_PERSIST_PATH = "../my_chroma_db"
+# Use absolute path for Docker compatibility
+CHROMA_PERSIST_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "my_chroma_db")
 CHROMA_COLLECTION_NAME = "company_faqs"
 
 # Global variables

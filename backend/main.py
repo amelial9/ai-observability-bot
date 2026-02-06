@@ -1,6 +1,7 @@
 import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -51,12 +52,23 @@ app.add_middleware(
 )
 
 
+# Get the base directory (works both locally and in Docker)
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "frontend" / "static"
+TEMPLATES_DIR = BASE_DIR / "frontend"
+
+# Ensure directories exist
+if not STATIC_DIR.exists():
+    print(f"Warning: Static directory not found at {STATIC_DIR}")
+if not TEMPLATES_DIR.exists():
+    print(f"Warning: Templates directory not found at {TEMPLATES_DIR}")
+
 app.mount(
     "/static",
-    StaticFiles(directory="../frontend/static"),
+    StaticFiles(directory=str(STATIC_DIR)),
     name="static"
 )
-templates = Jinja2Templates(directory="../frontend")
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @app.on_event("startup")

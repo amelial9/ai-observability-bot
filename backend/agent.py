@@ -19,7 +19,8 @@ load_dotenv()
 
 # Configuration - REPLACE THESE VALUES
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Your test OpenAI key
-OTEL_ENDPOINT = "http://localhost:4328"  # OTEL endpoint in Docker
+# Use container name for Docker network communication
+OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://otel-collector:4328")  # OTEL endpoint in Docker
 SERVICE_NAME = "openai-sidecar-test"  # Identify in Splunk
 ENVIRONMENT = "sidecar-agent"
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
@@ -167,7 +168,8 @@ def setup_splunk_otel():
 
     try:
         # Configuration from environment variables
-        OTEL_ENDPOINT = "http://localhost:4328/v1/traces"
+        # Use container name for Docker network communication
+        OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://otel-collector:4328/v1/traces")
         SERVICE_NAME = "beeai-faq-agent"
         ENVIRONMENT = "production"
 

@@ -14,5 +14,4 @@ OpenLIT
 
 # New requirements for sentiment analysis and email
 openai>=1.0.0
-
 dotenv

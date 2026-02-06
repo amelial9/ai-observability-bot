@@ -1,6 +1,8 @@
 version: '3.8'
 
 services:
+  # Main application
+  # Note: Splunk OTEL Collector runs on separate testserver, not in this container
   ai-observability-bot:
     build: .
     container_name: ai-observability-bot
@@ -17,3 +19,4 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    network_mode: bridge

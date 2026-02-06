@@ -87,6 +87,12 @@ async def serve_frontend(request: Request):
     """Serve the main HTML page for the frontend."""
     return templates.TemplateResponse("index.html", {"request": request})
 
+@app.get("/agent-dashboard", response_class=HTMLResponse)
+@app.get("/agent-dashboard.html", response_class=HTMLResponse)
+async def serve_agent_dashboard(request: Request):
+    """Serve the agent dashboard HTML page."""
+    return templates.TemplateResponse("agent-dashboard.html", {"request": request})
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request_body: ChatRequest):
     """

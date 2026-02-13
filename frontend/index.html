@@ -19,13 +19,17 @@
         <i class="fas fa-comment-dots"></i>
     </div>
 
-    <div class="chat-container chat-container-closed" id="chat-container">
+        <div class="chat-container chat-container-closed" id="chat-container">
         <div class="chat-header">
             <div>
                 <h3>Company FAQ Assistant</h3>
                 <div id="agent-status" class="agent-status" style="display: none;">
-                    <i class="fas fa-circle status-indicator"></i>
-                    Connected to <span id="agent-name">Agent</span>
+                    <span class="agent-status-pill">
+                        <i class="fas fa-headset agent-status-icon"></i>
+                        <span class="status-dot"></span>
+                        <span class="agent-status-label">Live agent:</span>
+                        <span id="agent-name" class="agent-status-name">Agent</span>
+                    </span>
                 </div>
             </div>
             <button id="close-button" class="close-button">&times;</button>

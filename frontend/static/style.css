@@ -87,6 +87,63 @@ body {
     margin-bottom: 15px;
 }
 
+.agent-status {
+    margin-top: 4px;
+}
+
+.agent-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(0, 123, 255, 0.08);
+    color: #555;
+    font-size: 0.78em;
+    font-weight: 500;
+}
+
+.agent-status-icon {
+    font-size: 0.9em;
+    color: var(--primary-color);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25);
+    animation: status-pulse 1.6s ease-out infinite;
+}
+
+@keyframes status-pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    70% {
+        transform: scale(1.4);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1.4);
+        opacity: 0;
+    }
+}
+
+.agent-status-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.7em;
+    color: #6b7280;
+}
+
+.agent-status-name {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
 .chat-header h3 {
     font-size: 1.2em;
     color: #333;

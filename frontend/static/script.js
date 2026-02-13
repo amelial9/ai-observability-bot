@@ -24,7 +24,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sender === 'user') {
             messageDiv.classList.add('user-message');
         } else if (sender === 'bot') {
-            messageDiv.classList.add('bot-message');
+            // If we're currently connected to a live agent,
+            // visually treat these as agent messages so they stand out.
+            if (isConnectedToAgent) {
+                messageDiv.classList.add('agent-message');
+            } else {
+                messageDiv.classList.add('bot-message');
+            }
+        } else if (sender === 'agent') {
+            messageDiv.classList.add('agent-message');
         } else if (sender === 'system') {
             messageDiv.classList.add('system-message');
         }
@@ -146,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
 
                 case 'agent_message':
-                    addMessage(data.content, 'bot');
+                    addMessage(`${data.agent_name || 'Agent'}: ${data.content}`, 'agent');
                     break;
 
                 case 'agent_left':

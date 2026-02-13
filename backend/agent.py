@@ -73,7 +73,7 @@ def patched_create(*args, **kwargs):
 
         response = original_create(*args, **kwargs)
         text = response.choices[0].message.content if response.choices else "<empty_response>"
-        
+
         # === Evaluation ===
         results = None
         if all_evals:
@@ -154,17 +154,17 @@ def setup_splunk_otel():
     if not OTEL_AVAILABLE:
         print("OpenTelemetry not available - skipping OTEL setup")
         return None
-    
+
     try:
         OTEL_ENDPOINT = "http://localhost:4328/v1/traces"
         SERVICE_NAME = "beeai-faq-agent"
         ENVIRONMENT = "production"
-        
+
         print(f"Setting up Splunk SignalFX OTEL integration...")
         print(f"   Endpoint: {OTEL_ENDPOINT}")
         print(f"   Service: {SERVICE_NAME}")
         print(f"   Environment: {ENVIRONMENT}")
-        
+
         resource = Resource.create({
             "service.name": SERVICE_NAME,
             "service.version": "1.0.0",
@@ -172,20 +172,20 @@ def setup_splunk_otel():
             "telemetry.sdk.name": "beeai-framework",
             "telemetry.sdk.version": "0.1.17"
         })
-        
+
         tracer_provider = TracerProvider(resource=resource)
-        
+
         otlp_exporter = OTLPSpanExporter(
             endpoint=OTEL_ENDPOINT,
             headers={}
         )
-        
+
         tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
         trace.set_tracer_provider(tracer_provider)
-        
+
         print("Splunk SignalFX OTEL integration configured successfully")
         return tracer_provider
-        
+
     except Exception as e:
         print(f"Failed to configure Splunk SignalFX OTEL: {e}")
         print("Check your OTEL endpoint and configuration")
@@ -194,20 +194,20 @@ def setup_splunk_otel():
 def test_span_export(tracer_provider, endpoint: str):
     try:
         print(f"Testing span export to {endpoint}...")
-        
+
         test_tracer = trace.get_tracer("span-test")
         with test_tracer.start_as_current_span("test_span") as span:
             span.set_attribute("test.attribute", "span_export_test")
             span.set_attribute("test.timestamp", time.time())
             span.set_attribute("test.service", "beeai-faq-agent")
-        
+
         # Use short timeout to avoid blocking 30s when OTEL collector is unreachable (e.g. in Docker)
         tracer_provider.force_flush(timeout_millis=3000)
-        
+
         print("Span export test completed successfully")
         print("Check your Splunk dashboard for the test span")
         return True
-        
+
     except Exception as e:
         print(f"Span export test failed: {e}")
         print("Check your OTEL endpoint connectivity")
@@ -221,14 +221,14 @@ def _setup_rag_system():
         return True
 
     print("Setting up RAG system components...")
-    
+
     if OTEL_AVAILABLE:
         try:
             _tracer_provider = setup_splunk_otel()
             if _tracer_provider:
                 _tracer = trace.get_tracer("beeai-faq-agent")
                 print("OpenTelemetry tracer initialized for observability")
-                
+
                 # Skip span export test during setup - it can block 30s if OTEL collector unreachable (e.g. Docker).
                 # Traces will still export; test is optional. Set OTEL_SKIP_SPAN_TEST=0 to run it.
                 if os.getenv("OTEL_SKIP_SPAN_TEST", "1") != "0":
@@ -247,7 +247,7 @@ def _setup_rag_system():
             print("Continuing without observability")
     else:
         print("OpenTelemetry not available - running without observability")
-    
+
     try:
         _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
         print("Embedding model loaded.")
@@ -315,29 +315,29 @@ class FAQTool(Tool):
                 span.set_attribute("tool.description", self.description)
                 span.set_attribute("faq.query", query)
                 span.set_attribute("faq.query_length", len(query))
-                
+
                 try:
                     with _tracer.start_as_current_span("query_embedding") as embedding_span:
                         embedding_span.set_attribute("embedding.model", "sentence-transformers")
                         embedding_span.set_attribute("embedding.model_name", "all-MiniLM-L6-v2")
-                        
+
                         query_embedding = self.embedding_model.encode(query).tolist()
                         embedding_span.set_attribute("embedding.vector_size", len(query_embedding))
                         embedding_span.set_attribute("embedding.success", True)
-                    
+
                     with _tracer.start_as_current_span("chroma_search") as search_span:
                         search_span.set_attribute("chroma.collection", CHROMA_COLLECTION_NAME)
                         search_span.set_attribute("chroma.n_results", 3)
-                        
+
                         results = self.chroma_collection.query(
                             query_embeddings=[query_embedding],
                             n_results=3,
                             include=['documents', 'metadatas']
                         )
-                        
+
                         search_span.set_attribute("chroma.results_count", len(results.get('documents', [[]])[0]) if results and results.get('documents') else 0)
                         search_span.set_attribute("chroma.search_success", True)
-                    
+
                     with _tracer.start_as_current_span("result_processing") as process_span:
                         retrieved_contexts = []
                         if results and results.get('documents') and results['documents'][0]:
@@ -347,39 +347,39 @@ class FAQTool(Tool):
                                 question = metadata.get('question', 'N/A')
                                 answer = metadata.get('answer', doc_content)
                                 retrieved_contexts.append(f"Question: {question}\nAnswer: {answer}")
-                        
+
                         process_span.set_attribute("processing.contexts_count", len(retrieved_contexts))
                         process_span.set_attribute("processing.success", True)
-                    
+
                     if not retrieved_contexts:
                         span.set_attribute("faq.no_results", True)
                         span.set_attribute("faq.status", "no_results")
                         return "No relevant information found in the FAQs."
-                    
+
                     context_string = "\n\n".join(retrieved_contexts)
                     span.set_attribute("faq.results_found", True)
                     span.set_attribute("faq.status", "success")
                     span.set_attribute("faq.response_length", len(context_string))
-                    
+
                     return context_string
-                    
+
                 except Exception as e:
                     span.set_attribute("faq.status", "error")
                     span.set_attribute("error.message", str(e))
                     span.set_attribute("error.type", type(e).__name__)
-                    
+
                     print(f"Error in FAQ tool execution: {e}")
                     return f"Error processing query for FAQ lookup: {e}"
         else:
             try:
                 query_embedding = self.embedding_model.encode(query).tolist()
-                
+
                 results = self.chroma_collection.query(
                     query_embeddings=[query_embedding],
                     n_results=3,
                     include=['documents', 'metadatas']
                 )
-                
+
                 retrieved_contexts = []
                 if results and results.get('documents') and results['documents'][0]:
                     for i in range(len(results['documents'][0])):
@@ -388,13 +388,13 @@ class FAQTool(Tool):
                         question = metadata.get('question', 'N/A')
                         answer = metadata.get('answer', doc_content)
                         retrieved_contexts.append(f"Question: {question}\nAnswer: {answer}")
-                
+
                 if not retrieved_contexts:
                     return "No relevant information found in the FAQs."
-                
+
                 context_string = "\n\n".join(retrieved_contexts)
                 return context_string
-                
+
             except Exception as e:
                 return f"Error processing query for FAQ lookup: {e}"
 
@@ -405,7 +405,7 @@ async def run_faq_agent(user_query: str) -> str:
             span.set_attribute("workflow.query", user_query)
             span.set_attribute("workflow.query_length", len(user_query))
             span.set_attribute("workflow.timestamp", time.time())
-            
+
             try:
                 with _tracer.start_as_current_span("rag_system_setup") as setup_span:
                     if not _setup_rag_system():
@@ -413,16 +413,16 @@ async def run_faq_agent(user_query: str) -> str:
                         span.set_attribute("workflow.status", "setup_failed")
                         return "Backend RAG system failed to initialize. Please check server logs."
                     setup_span.set_attribute("setup.status", "success")
-                
+
                 print("Calling the faq_lookup_tool...")
                 with _tracer.start_as_current_span("faq_tool_execution") as tool_span:
                     tool_span.set_attribute("tool.name", "faq_lookup_tool")
                     retrieved_info = await _faq_tool_instance._run(user_query)
                     tool_span.set_attribute("tool.response_length", len(retrieved_info))
                     tool_span.set_attribute("tool.success", True)
-               
+
                 prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
-                
+
                 with _tracer.start_as_current_span("prompt_construction") as prompt_span:
                     prompt_span.set_attribute("prompt.retrieved_info_length", len(retrieved_info))
                     prompt_span.set_attribute("prompt.final_length", len(prompt_for_agent))
@@ -431,7 +431,7 @@ async def run_faq_agent(user_query: str) -> str:
                 with _tracer.start_as_current_span("agent_workflow_execution") as workflow_span:
                     workflow_span.set_attribute("workflow.agent_name", "FAQAgent")
                     workflow_span.set_attribute("workflow.llm_model", "openai:gpt-4o")
-                    
+
                     response = await _agent_workflow.run(
                         inputs=[
                             AgentWorkflowInput(
@@ -439,19 +439,19 @@ async def run_faq_agent(user_query: str) -> str:
                             )
                         ]
                     )
-                    
+
                     final_answer = response.result.final_answer
                     workflow_span.set_attribute("workflow.response_length", len(final_answer))
                     workflow_span.set_attribute("workflow.success", True)
                     span.set_attribute("workflow.status", "success")
-                    
+
                     return final_answer
-                    
+
             except Exception as e:
                 span.set_attribute("workflow.status", "error")
                 span.set_attribute("error.message", str(e))
                 span.set_attribute("error.type", type(e).__name__)
-                
+
                 print(f"Error running agent workflow: {e}")
                 return f"An error occurred while processing your request: {e}"
     else:
@@ -460,7 +460,7 @@ async def run_faq_agent(user_query: str) -> str:
 
         print("Calling the faq_lookup_tool...")
         retrieved_info = await _faq_tool_instance._run(user_query)
-       
+
         prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
 
         try:
@@ -500,7 +500,7 @@ def get_observability_data() -> dict:
             "loaded": _embedding_model is not None
         },
         "status": "ready" if all([
-            _embedding_model, _chroma_collection, _llm, 
+            _embedding_model, _chroma_collection, _llm,
             _faq_tool_instance, _agent_workflow
         ]) else "initializing"
     }

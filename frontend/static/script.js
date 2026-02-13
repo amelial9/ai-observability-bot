@@ -86,6 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingIndicator.style.display = 'block';
 
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -95,10 +97,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     query: query,
                     session_id: sessionId
                 }),
+                signal: controller.signal,
             });
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorData = await response.json();
+                const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
             }
 
@@ -117,7 +121,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            addMessage(`Sorry, there was an error processing your request: ${error.message}`, 'bot');
+            const msg = error.name === 'AbortError'
+                ? 'Request timed out. The server may be slow. Please try again.'
+                : `Sorry, there was an error processing your request: ${error.message}`;
+            addMessage(msg, 'bot');
         } finally {
             sendButton.disabled = false;
             loadingIndicator.style.display = 'none';

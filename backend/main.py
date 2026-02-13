@@ -178,10 +178,19 @@ async def chat_endpoint(request_body: ChatRequest):
             state=SessionState.WAITING_FOR_AGENT
         )
     
-    # If session is in live agent mode, don't process with AI
+    # If session is in live agent mode, forward message to agent (don't process with AI)
+    # Squarespace and other embeds often use REST /chat instead of WebSocket, so we must
+    # forward here too—not only in customer_websocket
     if session.state == SessionState.LIVE_AGENT:
+        if session.agent_id:
+            await connection_manager.send_to_agent(session.agent_id, {
+                "type": "customer_message",
+                "session_id": session_id,
+                "content": user_query,
+                "timestamp": datetime.now().isoformat()
+            })
         return ChatResponse(
-            answer="You are currently connected to a live agent. Please use the chat to communicate.",
+            answer="Message sent. Waiting for agent reply.",
             session_id=session_id,
             state=session.state,
             agent_name=session.agent_name

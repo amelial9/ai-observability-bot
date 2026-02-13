@@ -113,7 +113,7 @@ def patched_create(*args, **kwargs):
                         except Exception as e:
                             print(f"Guardrail check failed: {e}")
 
-                    trace.get_tracer_provider().force_flush()
+                    trace.get_tracer_provider().force_flush(timeout_millis=2000)
                     print("test4: span flushed")
              except Exception as e:
                 print(f"Tracing failed: {e}")
@@ -201,7 +201,8 @@ def test_span_export(tracer_provider, endpoint: str):
             span.set_attribute("test.timestamp", time.time())
             span.set_attribute("test.service", "beeai-faq-agent")
         
-        tracer_provider.force_flush()
+        # Use short timeout to avoid blocking 30s when OTEL collector is unreachable (e.g. in Docker)
+        tracer_provider.force_flush(timeout_millis=3000)
         
         print("Span export test completed successfully")
         print("Check your Splunk dashboard for the test span")
@@ -228,12 +229,17 @@ def _setup_rag_system():
                 _tracer = trace.get_tracer("beeai-faq-agent")
                 print("OpenTelemetry tracer initialized for observability")
                 
-                otel_endpoint = os.getenv("OTEL_ENDPOINT", "http://localhost:4328")
-                span_test_success = test_span_export(_tracer_provider, otel_endpoint)
-                if not span_test_success:
-                    print("Warning: Span export test failed - traces may not be reaching Splunk")
+                # Skip span export test during setup - it can block 30s if OTEL collector unreachable (e.g. Docker).
+                # Traces will still export; test is optional. Set OTEL_SKIP_SPAN_TEST=0 to run it.
+                if os.getenv("OTEL_SKIP_SPAN_TEST", "1") != "0":
+                    print("Skipping span export test (set OTEL_SKIP_SPAN_TEST=0 to enable)")
                 else:
-                    print("Span export test passed - traces are being sent to Splunk successfully")
+                    otel_endpoint = os.getenv("OTEL_ENDPOINT", "http://localhost:4328")
+                    span_test_success = test_span_export(_tracer_provider, otel_endpoint)
+                    if not span_test_success:
+                        print("Warning: Span export test failed - traces may not be reaching Splunk")
+                    else:
+                        print("Span export test passed - traces are being sent to Splunk successfully")
             else:
                 print("OpenTelemetry setup failed - continuing without observability")
         except Exception as e:

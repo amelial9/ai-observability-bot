@@ -93,7 +93,7 @@ async def startup_event():
         print("RAG system initialization failed during startup.")
     else:
         print("RAG system initialized successfully.")
-
+    
     # Initialize BeeAI Instrumentor if available
     if BeeAIInstrumentor:
         try:
@@ -126,9 +126,9 @@ async def chat_endpoint(request_body: ChatRequest):
     """
     user_query = request_body.query
     session_id = request_body.session_id
-
+    
     print(f"Received query: {user_query}")
-
+    
     # Create or get session
     if not session_id:
         session_id = session_manager.create_session()
@@ -139,63 +139,54 @@ async def chat_endpoint(request_body: ChatRequest):
         if not session:
             print(f"Session {session_id} not found, creating new session")
             session_id = session_manager.create_session()
-
+    
     session = session_manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=500, detail="Failed to create session")
-
+    
     # Add customer message to history
     session_manager.add_message(session_id, ChatMessage(
         sender="customer",
         content=user_query
     ))
-
+    
     # Check if customer wants to talk to a live agent
     if session_manager.detect_handoff_request(user_query):
         print(f"Handoff request detected for session {session_id}")
         session_manager.request_handoff(session_id)
-
+        
         # Notify all connected agents about new customer in queue
         await connection_manager.broadcast_to_all_agents({
             "type": "new_customer",
             "session_id": session_id,
             "message": "New customer waiting in queue"
         })
-
+        
         response_text = (
             "I'll connect you with a live agent right away. "
             "Please wait a moment while I find someone to help you..."
         )
-
+        
         session_manager.add_message(session_id, ChatMessage(
             sender="system",
             content=response_text
         ))
-
+        
         return ChatResponse(
             answer=response_text,
             session_id=session_id,
             state=SessionState.WAITING_FOR_AGENT
         )
-
-    # If session is in live agent mode, forward message to agent (don't process with AI)
-    # Squarespace and other embeds often use REST /chat instead of WebSocket, so we must
-    # forward here too—not only in customer_websocket
+    
+    # If session is in live agent mode, don't process with AI
     if session.state == SessionState.LIVE_AGENT:
-        if session.agent_id:
-            await connection_manager.send_to_agent(session.agent_id, {
-                "type": "customer_message",
-                "session_id": session_id,
-                "content": user_query,
-                "timestamp": datetime.now().isoformat()
-            })
         return ChatResponse(
-            answer="Message sent. Waiting for agent reply.",
+            answer="You are currently connected to a live agent. Please use the chat to communicate.",
             session_id=session_id,
             state=session.state,
             agent_name=session.agent_name
         )
-
+    
     # If session is waiting for agent, remind them
     if session.state == SessionState.WAITING_FOR_AGENT:
         return ChatResponse(
@@ -203,16 +194,16 @@ async def chat_endpoint(request_body: ChatRequest):
             session_id=session_id,
             state=session.state
         )
-
+    
     # Process with AI agent
     try:
         agent_answer = await run_faq_agent(user_query)
-
+        
         session_manager.add_message(session_id, ChatMessage(
             sender="agent",
             content=agent_answer
         ))
-
+        
         return ChatResponse(
             answer=agent_answer,
             session_id=session_id,
@@ -228,30 +219,30 @@ async def customer_websocket(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for customer real-time chat."""
     await connection_manager.connect_customer(session_id, websocket)
     session_manager.set_customer_connected(session_id, True)
-
+    
     try:
         while True:
             # Receive message from customer
             data = await websocket.receive_json()
             message_type = data.get("type")
-
+            
             if message_type == "message":
                 content = data.get("content", "")
                 session = session_manager.get_session(session_id)
-
+                
                 if not session:
                     await websocket.send_json({
                         "type": "error",
                         "message": "Session not found"
                     })
                     break
-
+                
                 # Add to history
                 session_manager.add_message(session_id, ChatMessage(
                     sender="customer",
                     content=content
                 ))
-
+                
                 # If in live agent mode, forward to agent
                 if session.state == SessionState.LIVE_AGENT and session.agent_id:
                     await connection_manager.send_to_agent(session.agent_id, {
@@ -260,7 +251,7 @@ async def customer_websocket(websocket: WebSocket, session_id: str):
                         "content": content,
                         "timestamp": datetime.now().isoformat()
                     })
-
+            
             elif message_type == "typing":
                 # Forward typing indicator to agent
                 session = session_manager.get_session(session_id)
@@ -270,7 +261,7 @@ async def customer_websocket(websocket: WebSocket, session_id: str):
                         "session_id": session_id,
                         "is_typing": data.get("is_typing", False)
                     })
-
+    
     except WebSocketDisconnect:
         print(f"Customer WebSocket disconnected: {session_id}")
     except Exception as e:
@@ -325,19 +316,19 @@ async def get_waiting_queue():
 async def accept_chat(session_id: str, agent_id: str):
     """Agent accepts a customer chat."""
     success = session_manager.assign_agent(session_id, agent_id)
-
+    
     if not success:
         raise HTTPException(status_code=400, detail="Failed to assign agent")
-
+    
     session = session_manager.get_session(session_id)
-
+    
     # Notify customer via WebSocket
     await connection_manager.send_to_customer(session_id, {
         "type": "agent_joined",
         "agent_name": session.agent_name,
         "message": f"{session.agent_name} has joined the chat"
     })
-
+    
     return {
         "success": True,
         "session": {
@@ -361,17 +352,17 @@ async def accept_chat(session_id: str, agent_id: str):
 async def end_agent_session_endpoint(session_id: str, return_to_ai: bool = False):
     """End an agent session."""
     success = session_manager.end_agent_session(session_id, return_to_ai)
-
+    
     if not success:
         raise HTTPException(status_code=400, detail="Failed to end session")
-
+    
     # Notify customer
     await connection_manager.send_to_customer(session_id, {
         "type": "agent_left",
         "return_to_ai": return_to_ai,
         "message": "Agent has left the chat" if not return_to_ai else "Agent has left. You can continue with AI assistant."
     })
-
+    
     return {"success": True}
 
 
@@ -396,17 +387,17 @@ async def get_agent_sessions(agent_id: str):
 async def agent_websocket(websocket: WebSocket, agent_id: str):
     """WebSocket endpoint for agent real-time communication."""
     await connection_manager.connect_agent(agent_id, websocket)
-
+    
     try:
         while True:
             # Receive message from agent
             data = await websocket.receive_json()
             message_type = data.get("type")
-
+            
             if message_type == "message":
                 session_id = data.get("session_id")
                 content = data.get("content", "")
-
+                
                 session = session_manager.get_session(session_id)
                 if not session:
                     await websocket.send_json({
@@ -414,14 +405,14 @@ async def agent_websocket(websocket: WebSocket, agent_id: str):
                         "message": "Session not found"
                     })
                     continue
-
+                
                 # Add to history
                 session_manager.add_message(session_id, ChatMessage(
                     sender="agent",
                     content=content,
                     agent_name=session.agent_name
                 ))
-
+                
                 # Forward to customer
                 await connection_manager.send_to_customer(session_id, {
                     "type": "agent_message",
@@ -429,7 +420,7 @@ async def agent_websocket(websocket: WebSocket, agent_id: str):
                     "agent_name": session.agent_name,
                     "timestamp": datetime.now().isoformat()
                 })
-
+            
             elif message_type == "typing":
                 # Forward typing indicator to customer
                 session_id = data.get("session_id")
@@ -437,7 +428,7 @@ async def agent_websocket(websocket: WebSocket, agent_id: str):
                     "type": "agent_typing",
                     "is_typing": data.get("is_typing", False)
                 })
-
+    
     except WebSocketDisconnect:
         print(f"Agent WebSocket disconnected: {agent_id}")
     except Exception as e:

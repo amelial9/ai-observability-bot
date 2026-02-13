@@ -17,6 +17,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const API_URL = '/chat';
 
+    // Mock telemetry store for feedback (queryable / exportable later, e.g. Splunk)
+    const feedbackLog = [];
+
+    function createFeedbackBlock(messageText, sender) {
+        const block = document.createElement('div');
+        block.className = 'message-feedback';
+        block.innerHTML = [
+            '<span class="feedback-prompt">Was this helpful?</span>',
+            '<div class="feedback-buttons">',
+            '  <button type="button" class="feedback-btn feedback-btn-yes" aria-label="Yes, helpful">👍</button>',
+            '  <button type="button" class="feedback-btn feedback-btn-no" aria-label="No, not helpful">👎</button>',
+            '</div>',
+            '<div class="feedback-comment-wrap" style="display:none">',
+            '  <input type="text" class="feedback-comment-input" placeholder="Tell us more (optional)" maxlength="500">',
+            '  <button type="button" class="feedback-comment-submit">Submit</button>',
+            '</div>',
+            '<span class="feedback-thanks" style="display:none">Thanks for your feedback!</span>',
+        ].join('');
+
+        const prompt = block.querySelector('.feedback-prompt');
+        const buttons = block.querySelector('.feedback-buttons');
+        const commentWrap = block.querySelector('.feedback-comment-wrap');
+        const commentInput = block.querySelector('.feedback-comment-input');
+        const commentSubmit = block.querySelector('.feedback-comment-submit');
+        const thanks = block.querySelector('.feedback-thanks');
+
+        function submitFeedback(helpful, comment) {
+            const entry = {
+                timestamp: new Date().toISOString(),
+                sender,
+                messagePreview: messageText.slice(0, 100) + (messageText.length > 100 ? '…' : ''),
+                helpful,
+                comment: comment || null,
+            };
+            feedbackLog.push(entry);
+            console.log('[Feedback telemetry]', entry);
+            prompt.style.display = 'none';
+            buttons.style.display = 'none';
+            commentWrap.style.display = 'none';
+            thanks.style.display = 'inline';
+        }
+
+        block.querySelector('.feedback-btn-yes').addEventListener('click', () => {
+            submitFeedback(true);
+        });
+
+        block.querySelector('.feedback-btn-no').addEventListener('click', () => {
+            buttons.style.display = 'none';
+            commentWrap.style.display = 'block';
+            commentInput.focus();
+        });
+
+        commentSubmit.addEventListener('click', () => {
+            submitFeedback(false, commentInput.value.trim() || null);
+        });
+        commentInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') commentSubmit.click();
+        });
+
+        return block;
+    }
+
     function addMessage(text, sender) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message');
@@ -38,7 +100,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         messageDiv.textContent = text;
-        chatHistory.appendChild(messageDiv);
+
+        /* Feedback "Was this helpful?" only for bot replies, not startup message or live agent messages */
+        if (sender === 'bot') {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'assistant-message-wrapper';
+            wrapper.appendChild(messageDiv);
+            wrapper.appendChild(createFeedbackBlock(text, sender));
+            chatHistory.appendChild(wrapper);
+        } else {
+            chatHistory.appendChild(messageDiv);
+        }
+
         chatHistory.scrollTop = chatHistory.scrollHeight;
     }
 
@@ -86,8 +159,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingIndicator.style.display = 'block';
 
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -97,12 +168,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     query: query,
                     session_id: sessionId
                 }),
-                signal: controller.signal,
             });
-            clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
+                const errorData = await response.json();
                 throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
             }
 
@@ -121,10 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            const msg = error.name === 'AbortError'
-                ? 'Request timed out. The server may be slow. Please try again.'
-                : `Sorry, there was an error processing your request: ${error.message}`;
-            addMessage(msg, 'bot');
+            addMessage(`Sorry, there was an error processing your request: ${error.message}`, 'bot');
         } finally {
             sendButton.disabled = false;
             loadingIndicator.style.display = 'none';
@@ -219,6 +285,11 @@ document.addEventListener('DOMContentLoaded', () => {
             sendMessage();
         }
     });
+
+    /* No feedback on startup message – leave initial bot message as plain bubble */
+
+    // Expose mock feedback log for inspection/export (e.g. Splunk correlation)
+    window.__feedbackLog = feedbackLog;
 
     console.log('Chat widget initialized');
 });

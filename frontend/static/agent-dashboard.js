@@ -57,7 +57,7 @@ async function login() {
 
 function showDashboard() {
     loginScreen.style.display = 'none';
-    dashboard.style.display = 'block';
+    dashboard.style.display = 'flex';
     loggedAgentName.textContent = agentName;
 }
 

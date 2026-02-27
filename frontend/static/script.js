@@ -1,8 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const SESSION_STORAGE_KEY = 'faq_session_id';
+    const HISTORY_STORAGE_KEY = 'faq_chat_history';
+
     let sessionId = null;
     let websocket = null;
     let isConnectedToAgent = false;
     let typingTimeout = null;
+    let chatHistoryState = [];
 
     const chatHistory = document.getElementById('chat-history');
     const userInput = document.getElementById('user-input');
@@ -19,6 +23,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mock telemetry store for feedback (queryable / exportable later, e.g. Splunk)
     const feedbackLog = [];
+
+    // Restore session and chat history for this browser tab (persists across refresh, cleared when tab closes)
+    try {
+        const storedSessionId = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (storedSessionId) {
+            sessionId = storedSessionId;
+            console.log('Restored existing chat session from sessionStorage:', sessionId);
+        }
+
+        const storedHistoryRaw = sessionStorage.getItem(HISTORY_STORAGE_KEY);
+        if (storedHistoryRaw) {
+            const parsed = JSON.parse(storedHistoryRaw);
+            if (Array.isArray(parsed)) {
+                chatHistoryState = parsed;
+                // Rehydrate UI without re-saving to storage
+                chatHistoryState.forEach((msg) => {
+                    if (msg && typeof msg.text === 'string' && typeof msg.sender === 'string') {
+                        addMessage(msg.text, msg.sender, { skipPersist: true });
+                    }
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to restore chat session from sessionStorage:', e);
+        sessionId = null;
+        chatHistoryState = [];
+        try {
+            sessionStorage.removeItem(SESSION_STORAGE_KEY);
+            sessionStorage.removeItem(HISTORY_STORAGE_KEY);
+        } catch {
+            // Ignore storage cleanup errors
+        }
+    }
 
     function createFeedbackBlock(messageText, sender) {
         const block = document.createElement('div');
@@ -79,7 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return block;
     }
 
-    function addMessage(text, sender) {
+    function addMessage(text, sender, options = {}) {
+        const { skipPersist = false } = options;
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message');
 
@@ -113,6 +151,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         chatHistory.scrollTop = chatHistory.scrollHeight;
+
+        if (!skipPersist) {
+            chatHistoryState.push({ text, sender });
+            try {
+                sessionStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(chatHistoryState));
+            } catch (e) {
+                console.warn('Failed to persist chat history to sessionStorage:', e);
+            }
+        }
     }
 
     // Typing indicator for customer
@@ -181,9 +228,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
 
-            // Update session ID
+            // Update session ID and persist it for this tab
             if (data.session_id) {
                 sessionId = data.session_id;
+                try {
+                    sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+                } catch (e) {
+                    console.warn('Failed to persist session id to sessionStorage:', e);
+                }
             }
 
             addMessage(data.answer, 'bot');

@@ -141,7 +141,10 @@ import chromadb
 
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
-# Use absolute path for Docker compatibility
+# Use absolute path for Docker compatibility; this must match the path used by
+# backend/extraction.py (CHROMA_PERSIST_PATH → amelia_chroma_db) and the
+# docker-compose volume mapping ./amelia_chroma_db:/app/amelia_chroma_db,
+# otherwise the agent will point at an empty vector database.
 CHROMA_PERSIST_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "amelia_chroma_db")
 CHROMA_COLLECTION_NAME = "company_faqs"
 

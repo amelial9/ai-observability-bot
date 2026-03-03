@@ -46,6 +46,8 @@ class SessionInfo(BaseModel):
     agent_name: Optional[str] = None
     created_at: datetime
     messages: List[ChatMessage] = Field(default_factory=list)
+    waiting_since: Optional[datetime] = None       # set when entering WAITING_FOR_AGENT
+    pending_timeout_msg: Optional[str] = None      # set by timeout task; delivered on next HTTP request if WS was closed
 
 
 class ChatRequest(BaseModel):

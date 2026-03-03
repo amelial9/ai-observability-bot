@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
@@ -110,6 +111,48 @@ async def health_check():
     }
 
 
+AGENT_WAIT_TIMEOUT_SECONDS = int(os.getenv("AGENT_WAIT_TIMEOUT_SECONDS", "60"))
+AGENT_WAIT_CHECK_INTERVAL = 10  # check every 10 s
+
+TIMEOUT_MESSAGE = (
+    "We apologize, all of our agents are assisting other customers right now. "
+    "Please try again in a few minutes."
+)
+
+async def _agent_wait_timeout_task():
+    """Background task: cancel sessions that waited too long for a live agent."""
+    while True:
+        await asyncio.sleep(AGENT_WAIT_CHECK_INTERVAL)
+        try:
+            timed_out = session_manager.get_timed_out_sessions(AGENT_WAIT_TIMEOUT_SECONDS)
+            for session in timed_out:
+                sid = session.session_id
+                print(f"[WaitTimeout] Session {sid} waited >{AGENT_WAIT_TIMEOUT_SECONDS}s — returning to AI mode")
+
+                # Cancel the handoff (sets state back to AI, removes from queue)
+                session_manager.cancel_handoff(sid)
+                session_manager.add_message(sid, ChatMessage(
+                    sender="system",
+                    content=TIMEOUT_MESSAGE
+                ))
+
+                # Try to push the message over WebSocket
+                if connection_manager.is_customer_connected(sid):
+                    await connection_manager.send_to_customer(sid, {
+                        "type": "timeout",
+                        "message": TIMEOUT_MESSAGE
+                    })
+                    print(f"[WaitTimeout] Timeout message sent via WebSocket to {sid}")
+                else:
+                    # WS already closed — store for delivery on the next HTTP request
+                    s = session_manager.get_session(sid)
+                    if s:
+                        s.pending_timeout_msg = TIMEOUT_MESSAGE
+                    print(f"[WaitTimeout] WS not connected for {sid} — stored as pending HTTP message")
+        except Exception as e:
+            print(f"[WaitTimeout] Error in timeout task: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initializes the RAG system when the FastAPI app starts up."""
@@ -119,7 +162,7 @@ async def startup_event():
         print("RAG system initialization failed during startup.")
     else:
         print("RAG system initialized successfully.")
-    
+
     # Initialize BeeAI Instrumentor if available
     if BeeAIInstrumentor:
         try:
@@ -127,6 +170,10 @@ async def startup_event():
             print("BeeAI Instrumentor initialized.")
         except Exception as e:
             print(f"Failed to initialize BeeAI Instrumentor: {e}")
+
+    # Start background task that auto-cancels timed-out agent waits
+    asyncio.create_task(_agent_wait_timeout_task())
+    print(f"Agent wait timeout task started (timeout={AGENT_WAIT_TIMEOUT_SECONDS}s, check every {AGENT_WAIT_CHECK_INTERVAL}s)")
 
 
 # ============================================================================
@@ -184,7 +231,18 @@ async def chat_endpoint(request_body: ChatRequest):
         sender="customer",
         content=user_query
     ))
-    
+
+    # HTTP fallback: deliver any timeout message the WebSocket couldn't deliver
+    pending_session = session_manager.get_session(session_id)
+    if pending_session and pending_session.pending_timeout_msg:
+        msg = pending_session.pending_timeout_msg
+        pending_session.pending_timeout_msg = None   # clear after delivering
+        return ChatResponse(
+            answer=msg,
+            session_id=session_id,
+            state=SessionState.AI
+        )
+
     # Check if customer wants to talk to a live agent
     if session_manager.detect_handoff_request(user_query):
         print(f"Handoff request detected for session {session_id}")
@@ -314,16 +372,30 @@ async def chat_endpoint(request_body: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
 
+WEBSOCKET_PING_INTERVAL = 20  # seconds between server-side pings
+
 @app.websocket("/ws/customer/{session_id}")
 async def customer_websocket(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for customer real-time chat."""
     await connection_manager.connect_customer(session_id, websocket)
     session_manager.set_customer_connected(session_id, True)
-    
+
     try:
         while True:
-            # Receive message from customer
-            data = await websocket.receive_json()
+            # Wait for a message; if none arrives within PING_INTERVAL send a ping
+            # to keep the browser from closing the idle connection.
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_json(),
+                    timeout=WEBSOCKET_PING_INTERVAL
+                )
+            except asyncio.TimeoutError:
+                # No message received — send a lightweight ping to keep alive
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break   # WebSocket closed; exit loop cleanly
+                continue
             message_type = data.get("type")
             
             if message_type == "message":

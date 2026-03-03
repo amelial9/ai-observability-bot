@@ -103,11 +103,27 @@ class SessionManager:
         session = self.get_session(session_id)
         if not session:
             return False
-        
+
         session.state = SessionState.WAITING_FOR_AGENT
+        session.waiting_since = datetime.now()
         if session_id not in self.waiting_queue:
             self.waiting_queue.append(session_id)
         return True
+
+    def get_timed_out_sessions(self, timeout_seconds: int = 60) -> List[SessionInfo]:
+        """Return sessions that have been waiting longer than timeout_seconds."""
+        now = datetime.now()
+        timed_out = []
+        for sid in list(self.waiting_queue):
+            session = self.sessions.get(sid)
+            if (
+                session
+                and session.state == SessionState.WAITING_FOR_AGENT
+                and session.waiting_since
+                and (now - session.waiting_since).total_seconds() >= timeout_seconds
+            ):
+                timed_out.append(session)
+        return timed_out
     
     def register_agent(self, agent_id: str, name: str) -> AgentInfo:
         """Register a new agent."""

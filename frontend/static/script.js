@@ -305,6 +305,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     break;
 
+                case 'ping':
+                    // Server keep-alive ping — no action needed
+                    break;
+
+                case 'timeout':
+                    // Agent wait timed out — server already returned session to AI mode
+                    isConnectedToAgent = false;
+                    agentStatus.style.display = 'none';
+                    addMessage(data.message, 'system');
+                    break;
+
                 case 'error':
                     addMessage(data.message, 'system');
                     break;

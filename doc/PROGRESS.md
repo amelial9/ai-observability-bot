@@ -21,7 +21,6 @@ Working, observable chatbot system that can be deployed and demoed quickly.
 - `[x]` FastAPI backend + chat API implemented
 - `[x]` BeeAI RAG pipeline implemented
 - `[x]` ChromaDB integration implemented
-- `[~]` Chroma storage path/documentation alignment is incomplete (`agent.py`/`extraction.py` use `amelia_chroma_db`, while README still references `my_chroma_db`)
 - `[x]` OpenLIT/OpenTelemetry instrumentation implemented (with graceful degradation)
 - `[x]` Dockerfile + docker-compose setup present
 - `[x]` Frontend chat UI present

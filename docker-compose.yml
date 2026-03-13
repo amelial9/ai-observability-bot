@@ -18,7 +18,7 @@ services:
     networks:
       - observability-net
     volumes:
-      - ./amelia_chroma_db:/app/amelia_chroma_db
+      - ./my_chroma_db:/app/my_chroma_db
     restart: unless-stopped
     depends_on:
       - otel-collector

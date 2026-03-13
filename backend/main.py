@@ -47,7 +47,7 @@ app = FastAPI(
 def _parse_cors_origins() -> list[str]:
     raw = os.getenv(
         "CORS_ORIGINS",
-        "http://localhost,http://localhost:8000,http://127.0.0.1:8080,http://0.0.0.0:8000,http://localhost:8001,http://127.0.0.1:8001",
+        "https://www.gekkocorporation.com,https://gekkocorporation.com,http://localhost,http://localhost:8000,http://127.0.0.1:8080,http://0.0.0.0:8000,http://localhost:8001,http://127.0.0.1:8001",
     )
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
